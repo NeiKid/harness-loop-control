@@ -35,10 +35,36 @@ productos lleva el del que decide (ante la duda, `{{fallback_prefix}}`).
   sección por producto; cada uno actualiza la suya sin pisar las otras.
 - La lista de productos vive en `_AI_LOOP_CONTROL/harness.json` y los scripts la leen de ahí. Agregar
   un producto es editar ese archivo y esta tabla en la misma iteración.
+{{#mcp_any}}
+
+## Arranque de sesión
+
+Lo primero de cada sesión, antes de leer el estado:
+
+```bash
+node scripts/agent-session.mjs start
+```
+
+Registra los MCPs del repo ({{mcp_servers_list}}) en la configuración de proyecto de cada herramienta,
+indexa el repo en codebase memory si hace falta y dice qué activar. **Seguir lo que imprime.**
+{{#mcp_hooked}}
+En {{mcp_hook_tools}} lo corre un hook al abrir la sesión y su salida llega como contexto; con
+cualquier otra herramienta lo corre el agente.
+{{/mcp_hooked}}
+{{^mcp_hooked}}
+Lo corre el agente al empezar.
+{{/mcp_hooked}}
+
+Los MCPs se instalan en la máquina, no en el repo: el script los encuentra en lo que ya está
+registrado en tus agentes, en el `PATH` o en su ruta de instalación, y escribe la configuración de
+proyecto (archivos en `.gitignore`, porque llevan rutas locales). Si un MCP recién registrado no
+aparece en la sesión, hay que reiniciarla. `node scripts/agent-session.mjs doctor` muestra qué está
+instalado, qué falta y cómo resolverlo.
+{{/mcp_any}}
 
 ## Orden de lectura
 
-1. Este archivo.
+1. Este archivo{{#mcp_any}}, y el arranque de sesión de arriba{{/mcp_any}}.
 2. `_AI_LOOP_CONTROL/LOOP_STATE.md` — qué se está construyendo ahora.
 3. `_AI_LOOP_CONTROL/ACTION_QUEUE.md` — las próximas tres prioridades.
 4. `_AI_LOOP_CONTROL/specs/README.md` y, de ahí, la spec activa: `spec.md`, `plan.md`, `tasks.md`.
@@ -161,10 +187,11 @@ El repo mantiene un grafo versionado en `.graphify/graph.json`, generado por `sc
 
 **Cuando el MCP `codebase-memory-mcp` esté disponible en la sesión**, es una fuente adicional para
 las mismas preguntas de arquitectura y relaciones de código, sobre un índice propio y local en vez
-del grafo versionado. No es configuración del repo: depende de lo que tenga instalado el agente que
-esté corriendo, y cualquier cliente MCP lo puede usar.
+del grafo versionado. Se instala en la máquina, no en el repo, y cualquier cliente MCP lo puede usar.
 
-- Si el repo todavía no está indexado, se indexa al empezar (`index_repository`).
+- El arranque de sesión lo registra y, si el repo todavía no está indexado, lo indexa en segundo
+  plano (modo `{{index_mode}}`; `codebase_memory.index_mode` en `harness.json`). Si no hay arranque de
+  sesión, se indexa con `index_repository`.
 - Se consulta antes o junto con {{#graphify}}el mapa{{/graphify}}{{^graphify}}grep{{/graphify}}; cuando no está, se sigue sin él como siempre.
 - Las decisiones **no** se guardan en sus ADR (`manage_adr`): viven en `DECISION_LEDGER.jsonl`, que es
   la única fuente. Dos registros de decisiones terminan contradiciéndose.
@@ -183,9 +210,9 @@ verdad: lo que otra sesión, otra persona u otro agente necesita saber se escrib
 El repo trabaja en modo Ponytail, nivel `{{ponytail_level}}`: el cambio más chico que resuelve la tarea
 completa, y una respuesta que una persona ocupada entiende en una lectura.
 
-**Cuando el MCP `ponytail` esté disponible en la sesión**, se invoca `ponytail_instructions` con
-`mode: "{{ponytail_level}}"` al empezar y se sigue su ruleset el resto de la sesión. Cuando no está, rigen
-estas reglas, que son su resumen:
+**Cuando el MCP `ponytail` esté disponible en la sesión** (el arranque de sesión lo registra si está
+instalado en la máquina), se invoca `ponytail_instructions` con `mode: "{{ponytail_level}}"` al empezar y se
+sigue su ruleset el resto de la sesión. Cuando no está, rigen estas reglas, que son su resumen:
 
 1. Antes de escribir: leer la tarea y el código que toca, y listar todo lo que el cambio tiene que
    alcanzar (llamadores, tests, fixtures, configuración, exports). Eso es el alcance; lo extra no.
@@ -203,6 +230,28 @@ estas reglas, que son su resumen:
 7. La respuesta termina con una o dos líneas: qué no se hizo o no se verificó, y el riesgo que el
    owner tiene que saber.
 {{/ponytail}}
+{{#versioning}}
+
+## Versionado
+
+La versión ({{version_files}}) sube sola en cada commit en `{{trunk}}`: el hook `post-commit` la deriva
+del encabezado del commit ([Conventional Commits](https://www.conventionalcommits.org/)) y la amenda
+dentro del mismo commit. Por eso **el encabezado no es cosmético: decide la versión.**
+
+| Encabezado | Salto | Ejemplo |
+|---|---|---|
+| `tipo!:` o `BREAKING CHANGE` en el cuerpo | major | `feat!: nueva API de sesiones` |
+| `feat:` | minor | `feat(api): login con SSO` |
+| cualquier otro (`fix`, `refactor`, `docs`, `chore`, …) | patch | `fix: timeout del login` |
+
+- Una entrega que mueve el producto va como `feat`, aunque técnicamente sea otra cosa; `fix`,
+  `refactor`, `docs` y `chore` quedan para lo que no lo mueve.
+- En una rama de trabajo la versión no se toca (todas chocarían al integrarse). Un merge local hacia
+  `{{trunk}}` se versiona por el commit más fuerte que trae.
+- No se versiona: el primer commit del repo, un `fixup!`/`squash!`, un commit que ya cambió la versión
+  a mano, o con `SKIP_VERSION_BUMP=1`.
+- El amend lleva sólo el cambio de versión: lo que haya sin commitear no entra al commit.
+{{/versioning}}
 
 ## Verificación por tipo de cambio
 
@@ -218,6 +267,12 @@ estas reglas, que son su resumen:
 {{#graphify}}
 | `scripts/graphify/**` | `npm run graph:test` y `npm run graph:build` |
 {{/graphify}}
+{{#hooks}}
+| `.githooks/**`{{#versioning}}, `scripts/bump-version.mjs`{{/versioning}} | Un commit de prueba en `{{trunk}}` en una copia del repo: que el hook haga lo suyo y que el commit no se rompa |
+{{/hooks}}
+{{#mcp_any}}
+| `scripts/agent-session.mjs` | `node scripts/agent-session.mjs doctor` y una sesión nueva con cada herramienta tocada |
+{{/mcp_any}}
 
 Si algo no se pudo comprobar (una UI que no se vio, un comando que no se pudo correr), se dice
 explícitamente en vez de asumir que está bien.

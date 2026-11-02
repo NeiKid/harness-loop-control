@@ -1,0 +1,15 @@
+#!/bin/sh
+# Hooks del harness, sólo en el tronco `{{trunk}}`. Fail-open: nunca frenan un commit.
+# Los amends que hacen estos scripts vuelven a disparar post-commit; HARNESS_HOOK corta el bucle.
+[ -n "$HARNESS_HOOK" ] && exit 0
+export HARNESS_HOOK=1
+ROOT="$(git rev-parse --show-toplevel)"
+{{#versioning}}
+# La versión sube según el encabezado del commit (AGENTS.md, «Versionado»).
+VERSION_BRANCHES="{{trunk}}" node "$ROOT/scripts/bump-version.mjs"
+{{/versioning}}
+{{#graphify}}
+# El mapa se regenera dentro del commit.
+GRAPH_BRANCHES="{{trunk}}" node "$ROOT/scripts/graphify/refresh-on-commit.mjs"
+{{/graphify}}
+exit 0

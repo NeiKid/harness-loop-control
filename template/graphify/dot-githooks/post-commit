@@ -1,4 +1,0 @@
-#!/bin/sh
-# El mapa se regenera dentro del commit, sólo en el tronco (fail-open: nunca frena un commit).
-ROOT="$(git rev-parse --show-toplevel)"
-GRAPH_BRANCHES="{{trunk}}" node "$ROOT/scripts/graphify/refresh-on-commit.mjs"

@@ -28,6 +28,7 @@ export const ADAPTERS = {
 }
 const ENGINES = ['code', 'docs', 'none']
 const LEVELS = ['lite', 'full', 'ultra']
+const INDEX_MODES = ['fast', 'moderate', 'full']
 const VERBATIM = /\.(mjs|cjs|js)$/
 
 export function validateSpec(spec) {
@@ -49,6 +50,9 @@ export function validateSpec(spec) {
   need(LEVELS.includes(spec.ponytail?.level ?? 'full'), `ponytail.level: ${LEVELS.join('|')}`)
   for (const a of spec.adapters ?? []) need(a in ADAPTERS, `adapters: ${a} desconocido (${Object.keys(ADAPTERS).join(', ')})`)
   need(['github', 'none'].includes(spec.ci ?? 'github'), 'ci: github|none')
+  const files = spec.versioning?.files ?? ['package.json']
+  need(Array.isArray(files) && files.length > 0, 'versioning.files: al menos un archivo')
+  need(INDEX_MODES.includes(spec.codebase_memory?.index_mode ?? 'fast'), `codebase_memory.index_mode: ${INDEX_MODES.join('|')}`)
   return errors
 }
 
@@ -59,7 +63,21 @@ export function buildContext(spec, now = new Date()) {
   const memory = spec.codebase_memory?.enabled !== false
   const adapters = spec.adapters ?? []
   const files = adapters.flatMap((a) => ADAPTERS[a]).map((f) => `\`${f}\``)
+  const mcpServers = [ponytail && 'ponytail', memory && 'codebase-memory-mcp'].filter(Boolean)
+  const versioning = spec.versioning?.enabled !== false
+  // Herramientas con hook de arranque de sesión que corre agent-session.mjs (las demás lo hacen por AGENTS.md).
+  const hookTools = mcpServers.length ? [['claude', 'Claude Code'], ['cursor', 'Cursor']].filter(([a]) => adapters.includes(a)).map(([, n]) => n) : []
   return {
+    ...Object.fromEntries(Object.keys(ADAPTERS).map((a) => [`adapter_${a}`, adapters.includes(a)])),
+    mcp_any: mcpServers.length > 0,
+    mcp_servers_json: JSON.stringify(mcpServers),
+    mcp_servers_list: mcpServers.map((s) => `\`${s}\``).join(' y '),
+    mcp_hooked: hookTools.length > 0,
+    mcp_hook_tools: hookTools.join(' y '),
+    versioning,
+    version_file_list: spec.versioning?.files ?? ['package.json'],
+    version_files: (spec.versioning?.files ?? ['package.json']).map((f) => `\`${f}\``).join(', '),
+    hooks: versioning || engine !== 'none',
     project_name: spec.project.name,
     project_title: spec.project.title,
     mission: spec.project.mission || 'TODO(owner): qué resuelve este repo, para quién y qué queda fuera.',
@@ -84,6 +102,7 @@ export function buildContext(spec, now = new Date()) {
     ponytail_level: level,
     ponytail_state: ponytail ? `activo (nivel ${level})` : 'desactivado',
     codebase_memory: memory,
+    index_mode: spec.codebase_memory?.index_mode ?? 'fast',
     codebase_memory_state: memory ? 'como complemento opcional' : 'desactivado',
     ci_github: (spec.ci ?? 'github') === 'github',
     adapters_any: files.length > 0,
@@ -112,9 +131,13 @@ export function plan(spec, now = new Date()) {
   const layers = [
     ['template/core', true],
     ['template/graphify', ctx.graphify],
+    ['template/hooks', ctx.hooks],
+    ['template/versioning', ctx.versioning],
+    ['template/mcp', ctx.mcp_any],
     ['template/ci-github', ctx.ci_github],
     ...adapters.map((a) => [`template/adapters/${a}`, true]),
-    ['template/adapters/claude-ponytail', adapters.includes('claude') && ctx.ponytail],
+    ['template/adapters/claude-mcp', ctx.adapter_claude && ctx.mcp_any],
+    ['template/adapters/cursor-mcp', ctx.adapter_cursor && ctx.mcp_any],
   ]
   const out = []
   for (const [layer, on] of layers) {
@@ -133,6 +156,10 @@ export function plan(spec, now = new Date()) {
       out.push({ path: `scripts/graphify/${relative(dir, file).split(sep).join('/')}`, content: readFileSync(file, 'utf-8') })
     }
   }
+  // Un archivo de versión de texto (VERSION) arranca en 0.1.0; package.json lo completa mergePackageJson.
+  if (ctx.versioning) {
+    for (const rel of ctx.version_file_list.filter((f) => !f.endsWith('.json'))) out.push({ path: rel, content: '0.1.0\n' })
+  }
   const config = { generated_from: 'harness-loop-control', generated_at: ctx.now, ...spec }
   out.push({ path: '_AI_LOOP_CONTROL/harness.json', content: `${JSON.stringify(config, null, 2)}\n` })
   return { ctx, files: out }
@@ -148,12 +175,22 @@ function mergePackageJson(target, ctx, dryRun, log) {
       'graph:build': 'node scripts/graphify/graphify.mjs build',
       'graph:check': 'node scripts/graphify/graphify.mjs stale',
       'graph:test': 'node --test scripts/graphify/graphify.test.mjs',
-      prepare:
-        "node -e \"try{const g=(a)=>require('node:child_process').execFileSync('git',a,{stdio:'ignore'});g(['config','core.hooksPath','.githooks']);g(['config','merge.ours.driver','true'])}catch{}\"",
     })
   }
+  if (ctx.mcp_any) scripts['agent:doctor'] = 'node scripts/agent-session.mjs doctor'
+  // Al instalar: hooks de git activos y MCPs registrados en esta máquina.
+  const prepare = [
+    ctx.hooks &&
+      "node -e \"try{const g=(a)=>require('node:child_process').execFileSync('git',a,{stdio:'ignore'});g(['config','core.hooksPath','.githooks']);g(['config','merge.ours.driver','true'])}catch{}\"",
+    ctx.mcp_any && 'node scripts/agent-session.mjs sync --quiet',
+  ].filter(Boolean)
+  if (prepare.length) scripts.prepare = prepare.join(' && ')
   pkg.scripts ??= {}
   const added = []
+  if (ctx.versioning && ctx.version_file_list.includes('package.json') && !pkg.version) {
+    pkg.version = '0.1.0'
+    added.push('version')
+  }
   for (const [name, command] of Object.entries(scripts)) {
     if (pkg.scripts[name] === undefined) {
       pkg.scripts[name] = command
@@ -171,7 +208,7 @@ function mergePackageJson(target, ctx, dryRun, log) {
   if (!dryRun) writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`)
 }
 
-/** `.gitattributes` existente: se le agregan las líneas que le faltan, al final. */
+/** `.gitattributes` o `.gitignore` existente: se le agregan las líneas que le faltan, al final. */
 function appendMissingLines(existing, content) {
   const have = new Set(existing.split(/\r?\n/).map((l) => l.trim()))
   const missing = content.split('\n').filter((l) => l.trim() && !l.startsWith('#') && !have.has(l.trim()))
@@ -184,7 +221,7 @@ export function generate({ spec, target, dryRun = false, force = false, now = ne
   for (const { path, content } of files) {
     const abs = join(target, path)
     if (existsSync(abs) && !force) {
-      if (path === '.gitattributes') {
+      if (path === '.gitattributes' || path === '.gitignore') {
         const merged = appendMissingLines(readFileSync(abs, 'utf-8'), content)
         if (merged) {
           log.merged.push(path)
@@ -243,12 +280,17 @@ function main(argv) {
   if (dryRun) return
 
   const notes = []
-  if (ctx.graphify && existsSync(join(target, '.git'))) {
+  if (ctx.hooks && existsSync(join(target, '.git'))) {
     run('git', ['config', 'core.hooksPath', '.githooks'], target)
     run('git', ['config', 'merge.ours.driver', 'true'], target)
     notes.push('hooks de git activos (core.hooksPath = .githooks)')
-  } else if (ctx.graphify) {
+  } else if (ctx.hooks) {
     notes.push('el destino no es un repo git: al hacer `git init`, correr `npm install` (script prepare) para activar los hooks')
+  }
+  if (ctx.mcp_any) {
+    const sync = run('node', ['scripts/agent-session.mjs', 'sync'], target)
+    const lines = sync.stdout.trim()
+    notes.push(lines ? `MCPs registrados en esta máquina:\n    ${lines.split('\n').join('\n    ')}` : 'ningún MCP encontrado en esta máquina: `npm run agent:doctor` dice cómo instalarlos')
   }
   if (ctx.graphify) {
     const graph = run('node', ['scripts/graphify/graphify.mjs', 'build'], target)

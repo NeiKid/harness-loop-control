@@ -75,8 +75,9 @@ Te muestra qué archivos crearía, cuáles completaría y cuáles ya existen (es
 node bin/harness-init.mjs --spec ../mi-repo/harness.spec.json --target ../mi-repo
 ```
 
-Al terminar, el generador activa los hooks de git, construye el mapa del código, revisa que todo
-quede consistente y te avisa si quedó algo marcado como `TODO(owner)` para completar a mano.
+Al terminar, el generador activa los hooks de git (versión y mapa), registra los MCPs que tengas
+instalados (Ponytail, codebase-memory) en cada herramienta, construye el mapa del código, revisa
+que todo quede consistente y te avisa si quedó algo marcado como `TODO(owner)` para completar a mano.
 
 Después puedes borrar `../mi-repo/harness.spec.json`: su contenido ya quedó guardado en
 `_AI_LOOP_CONTROL/harness.json`, que es la versión que manda de aquí en adelante.
@@ -102,6 +103,8 @@ Después puedes borrar `../mi-repo/harness.spec.json`: su contenido ya quedó gu
 | `_AI_LOOP_CONTROL/harness.json` | La configuración del harness (productos, prefijos, owners, ramas). |
 | `scripts/harness.mjs` | El ayudante: crea specs, numera decisiones y revisa que todo cuadre. |
 | `scripts/graphify/`, `.graphify/graph.json` | **El mapa del código**, versionado en el repo (si lo activaste). |
+| `scripts/agent-session.mjs` | **El arranque de sesión**: activa Ponytail y codebase-memory en cualquier agente. |
+| `scripts/bump-version.mjs`, `.githooks/` | **La versión automática**: sube sola con cada commit en la rama principal. |
 | `CLAUDE.md`, `GEMINI.md`, `.cursor/…` | Adaptadores: solo dicen «lee `AGENTS.md`». No tienen reglas propias. |
 
 Dos tipos de archivo, dos formas de tratarlos:
@@ -122,6 +125,43 @@ No hace falta explicarle nada. Basta con:
 
 La mayoría de las herramientas ya cargan `AGENTS.md` solas gracias a los adaptadores; la frase sirve
 igual para cualquier agente.
+
+Lo primero que `AGENTS.md` le pide al agente es el **arranque de sesión**, que deja listos los MCPs:
+
+```bash
+node scripts/agent-session.mjs start
+```
+
+- **Registra Ponytail y codebase-memory** en la configuración de cada herramienta que uses. No hay
+  que configurar nada a mano: el script los encuentra en lo que ya tienes registrado en tus agentes,
+  en el `PATH` o en su ruta de instalación.
+- **Indexa el repo en codebase-memory** la primera vez, en segundo plano, sin hacerte esperar.
+- **Le dice al agente qué activar**: por ejemplo, cargar Ponytail en el nivel del repo.
+
+En **Claude Code** y **Cursor** ni siquiera hay que pedirlo: un hook lo corre al abrir la sesión.
+Con el resto de los agentes lo corre el propio agente, porque así lo dice `AGENTS.md`.
+
+Los archivos de configuración que escribe (`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json`…)
+llevan rutas de tu máquina, por eso quedan en `.gitignore`: cada persona los genera en la suya al
+hacer `npm install` o al abrir la primera sesión. Si algo no aparece, `npm run agent:doctor` te dice
+qué está instalado, qué falta y cómo resolverlo.
+
+### Escribir los commits (la versión sube sola)
+
+La versión del proyecto sube sola en cada commit en la rama principal, y **el encabezado del commit
+decide cuánto**:
+
+| Si el commit empieza con… | La versión pasa de 1.4.2 a… | Úsalo para |
+|---|---|---|
+| `feat: …` | **1.5.0** | Algo nuevo que mueve el producto |
+| `fix: …`, `docs: …`, `refactor: …`, `chore: …` | **1.4.3** | Correcciones y cambios que no mueven el producto |
+| `feat!: …` o `BREAKING CHANGE` en el cuerpo | **2.0.0** | Un cambio que rompe a quien lo usa |
+
+- El salto queda **dentro del mismo commit**; no aparece un commit extra de versión.
+- En las ramas de trabajo la versión no se toca. Cuando haces un merge a la rama principal, sube
+  según el commit más fuerte que traiga la rama.
+- Lo que tengas sin commitear no se cuela en el commit de la versión.
+- ¿Necesitas saltarlo una vez? `SKIP_VERSION_BUMP=1 git commit …`.
 
 ### Pedir algo nuevo
 
@@ -244,11 +284,21 @@ Nada en el harness depende de un modelo o de un proveedor. Lo que sí depende de
 instalado está escrito como **opcional**:
 
 - **Ponytail**: el modo «el cambio más chico que resuelve todo». Sus reglas vienen resumidas en
-  `AGENTS.md`, así que se aplican siempre. Si tu agente tiene el MCP de Ponytail, además lo carga al
-  empezar (en Claude Code lo hace un hook automático).
-- **Codebase memory**: si tu agente tiene el MCP `codebase-memory-mcp`, lo usa como complemento del
-  mapa para entender el código. Si no, sigue sin él. Las decisiones nunca se guardan ahí: solo en el
-  libro de decisiones.
+  `AGENTS.md`, así que se aplican siempre. Si lo tienes instalado, el arranque de sesión lo registra
+  en tu agente y le pide cargarlo al empezar.
+- **Codebase memory**: si tienes `codebase-memory-mcp` instalado, el arranque de sesión lo registra,
+  indexa el repo y el agente lo usa como complemento del mapa. Si no, sigue sin él. Las decisiones
+  nunca se guardan ahí: solo en el libro de decisiones.
+
+| Herramienta | Dónde registra los MCPs el arranque | ¿Arranca solo? |
+|---|---|---|
+| Claude Code | `.mcp.json` (ya aprobados en `.claude/settings.json`) | Sí, hook `SessionStart` |
+| Cursor | `.cursor/mcp.json` | Sí, hook `sessionStart` |
+| Gemini CLI | `.gemini/settings.json` | Lo corre el agente |
+| GitHub Copilot (VS Code) | `.vscode/mcp.json` | Lo corre el agente |
+| OpenCode | `opencode.json` | Lo corre el agente |
+| Codex | `.codex/config.toml` | Lo corre el agente |
+| Windsurf, Cline | Solo leen MCPs de su configuración global: `codebase-memory-mcp install` los registra ahí | Lo corre el agente |
 - **La memoria propia de cada agente** no cuenta como fuente de verdad. Lo que importa queda escrito
   en el harness, donde lo ve cualquiera.
 
@@ -278,6 +328,9 @@ Se puede, y es seguro:
 | `harness check` dice que una spec «no está en specs/README.md» | Se creó la carpeta a mano. Agrega la fila al índice, o usa siempre `new-spec`. |
 | La consulta del mapa avisa que está atrasado | Normal en una rama de trabajo. Corre `npm run graph:build` si lo necesitas, sin commitear el resultado. |
 | En Git Bash una regex del mapa se convierte en ruta | Escribe `re:^patron` en vez de `/^patron/`. |
+| El agente no ve las herramientas de Ponytail o codebase-memory | Corre `npm run agent:doctor`. Si dice «NO ENCONTRADO», instala el MCP o define su ruta en `PONYTAIL_MCP` / `CODEBASE_MEMORY_MCP`. Si estaba recién registrado, reinicia la sesión del agente. |
+| La versión no sube | Solo sube en la rama principal y con los hooks activos (ver la primera fila). El primer commit del repo y los `fixup!` no la suben. |
+| La versión subió de más (minor en vez de patch) | El encabezado decide: `feat` es minor. Corrígelo con un commit que deje la versión correcta; ese commit no vuelve a subirla. |
 | Los hooks fallan en Windows con errores raros | Probablemente tienen fin de línea CRLF. El `.gitattributes` generado lo evita; si el repo ya existía, verifica que `.githooks/*` tenga `eol=lf`. |
 
 ---
@@ -297,7 +350,8 @@ Se puede, y es seguro:
 | `rules.extra[]` | Reglas propias de tu repo | Ninguna |
 | `graphify.engine` | `code` (código TS/JS), `docs` (repos de documentos) o `none` | `code` |
 | `ponytail` | `{ enabled, level }`, con nivel `lite`, `full` o `ultra` | Activo, `full` |
-| `codebase_memory.enabled` | Incluir la sección de codebase memory | Activo |
+| `codebase_memory` | `{ enabled, auto_index, index_mode }`: registrar el MCP, indexar al arrancar la sesión y con qué profundidad (`fast`, `moderate` o `full`) | Activo, indexa, `fast` |
+| `versioning` | `{ enabled, files }`: versión automática y en qué archivos vive (un `.json` con campo `version`, o un archivo de texto como `VERSION`) | Activo, `["package.json"]` |
 | `adapters[]` | `claude`, `codex`, `gemini`, `copilot`, `cursor`, `windsurf`, `cline`, `opencode` | Ninguno |
 | `ci` | `github` agrega un workflow que corre `harness check` y revisa el mapa | `github` |
 

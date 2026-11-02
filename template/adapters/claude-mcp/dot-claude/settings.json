@@ -1,0 +1,17 @@
+{
+  "enabledMcpjsonServers": {{mcp_servers_json}},
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/scripts/agent-session.mjs\" start --format claude",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -51,10 +51,13 @@ node <plantilla>/bin/harness-init.mjs --spec <repo>/harness.spec.json --target <
 ```
 
 El generador copia la spec a `_AI_LOOP_CONTROL/harness.json` (desde ahí manda), activa los hooks si
-el destino es git, intenta construir el mapa y corre `node scripts/harness.mjs check`. Después:
+el destino es git (versión y mapa), registra los MCPs instalados en la máquina en cada herramienta,
+intenta construir el mapa y corre `node scripts/harness.mjs check`. Después:
 
 - Borrar `<repo>/harness.spec.json`: su contenido ya vive en `harness.json`.
 - Motor `code`: `npm install` (agrega `typescript`) y `npm run graph:build`.
+- `npm run agent:doctor`: si falta un MCP, decirle al owner cómo instalarlo.
+- Con versionado activo, el primer commit queda en `0.1.0`; desde el segundo, el encabezado decide.
 
 ## 5. Completar lo que la plantilla no sabe
 

@@ -37,7 +37,8 @@
   },
   "graphify": { "engine": "code" },
   "ponytail": { "enabled": true, "level": "full" },
-  "codebase_memory": { "enabled": true },
+  "codebase_memory": { "enabled": true, "auto_index": true, "index_mode": "fast" },
+  "versioning": { "enabled": true, "files": ["package.json"] },
   "adapters": ["claude", "codex", "gemini", "copilot", "cursor", "windsurf", "cline", "opencode"],
   "ci": "github"
 }

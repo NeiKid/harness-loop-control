@@ -1,0 +1,19 @@
+# MCPs registrados por scripts/agent-session.mjs: llevan rutas de esta máquina, no se versionan.
+{{#adapter_claude}}
+.mcp.json
+{{/adapter_claude}}
+{{#adapter_cursor}}
+.cursor/mcp.json
+{{/adapter_cursor}}
+{{#adapter_gemini}}
+.gemini/settings.json
+{{/adapter_gemini}}
+{{#adapter_copilot}}
+.vscode/mcp.json
+{{/adapter_copilot}}
+{{#adapter_opencode}}
+opencode.json
+{{/adapter_opencode}}
+{{#adapter_codex}}
+.codex/config.toml
+{{/adapter_codex}}

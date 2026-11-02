@@ -88,6 +88,57 @@ test('new-spec, next-dec y el check detectan lo que falta', () => {
   assert.match(check.stderr, /secuencia es global/)
 })
 
+test('versionado: el hook sube la versión según el encabezado, sólo en el tronco', () => {
+  const dir = fresh()
+  const git = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: dir, encoding: 'utf-8' })
+  git('init', '-q', '-b', 'dev')
+  generate({ spec: minimal, target: dir })
+  git('config', 'core.hooksPath', '.githooks')
+  const version = () => JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8')).version
+  git('add', '-A')
+  git('commit', '-qm', 'chore: bootstrap')
+  assert.equal(version(), '0.1.0') // el primer commit no se versiona
+  for (const [message, expected] of [['feat: a', '0.2.0'], ['fix: b', '0.2.1'], ['feat!: c', '1.0.0'], ['docs: d', '1.0.1']]) {
+    git('commit', '-q', '--allow-empty', '-m', message)
+    assert.equal(version(), expected, message)
+  }
+  assert.equal(git('show', 'HEAD:package.json').stdout.includes('"1.0.1"'), true) // el bump va dentro del commit
+  git('checkout', '-q', '-b', 'doc/x')
+  git('commit', '-q', '--allow-empty', '-m', 'feat: en rama')
+  assert.equal(version(), '1.0.1')
+})
+
+test('agent-session: registra los MCPs de la máquina en cada herramienta, sin pisar lo ajeno', () => {
+  const dir = fresh()
+  generate({ spec: example, target: dir })
+  const configPath = join(dir, '_AI_LOOP_CONTROL/harness.json')
+  const config = JSON.parse(readFileSync(configPath, 'utf-8'))
+  config.codebase_memory.auto_index = false
+  writeFileSync(configPath, JSON.stringify(config))
+  writeFileSync(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { otro: { command: 'x', args: [] } } }))
+
+  // Máquina falsa: sin configuraciones de usuario, MCPs en rutas conocidas.
+  const home = fresh()
+  const ponytail = join(home, 'ponytail-index.js')
+  writeFileSync(ponytail, '')
+  const env = { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: home, PONYTAIL_MCP: ponytail, CODEBASE_MEMORY_MCP: join(home, 'cbm') }
+  const session = (...args) => spawnSync('node', ['scripts/agent-session.mjs', ...args], { cwd: dir, encoding: 'utf-8', env })
+
+  assert.equal(session('sync').status, 0)
+  const mcp = JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf-8')).mcpServers
+  assert.deepEqual(Object.keys(mcp), ['otro', 'ponytail', 'codebase-memory-mcp'])
+  assert.deepEqual(mcp.ponytail, { command: 'node', args: [ponytail] })
+  assert.ok(JSON.parse(readFileSync(join(dir, '.vscode/mcp.json'), 'utf-8')).servers.ponytail.type === 'stdio')
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, 'opencode.json'), 'utf-8')).mcp['codebase-memory-mcp'].command, [join(home, 'cbm')])
+  assert.match(readFileSync(join(dir, '.codex/config.toml'), 'utf-8'), /\[mcp_servers\.ponytail\]/)
+  assert.match(session('sync').stdout, /\.mcp\.json: sin cambios/)
+  assert.match(readFileSync(join(dir, '.gitignore'), 'utf-8'), /^\.mcp\.json$/m)
+
+  const hook = session('start', '--format', 'claude')
+  assert.equal(hook.status, 0)
+  assert.match(JSON.parse(hook.stdout).hookSpecificOutput.additionalContext, /ponytail_instructions.*"full"/)
+})
+
 test('no pisa un repo existente: completa .gitattributes y package.json', () => {
   const dir = fresh()
   writeFileSync(join(dir, 'AGENTS.md'), 'mío\n')

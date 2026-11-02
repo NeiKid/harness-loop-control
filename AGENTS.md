@@ -12,6 +12,10 @@ mantener la plantilla; las del harness generado están en `template/core/AGENTS.
 | `lib/render.mjs` | Render mínimo: `{{var}}`, `{{#seccion}}`, `{{^seccion}}` |
 | `template/core/` | Lo que siempre se genera: `AGENTS.md`, `_AI_LOOP_CONTROL/`, `scripts/harness.mjs` |
 | `template/graphify/`, `template/ci-github/` | Capas opcionales según la spec |
+| `template/hooks/` | Hooks de git (`post-commit`, `post-merge`): versión y mapa, sólo en el tronco |
+| `template/versioning/` | `scripts/bump-version.mjs`: versión automática por Conventional Commits |
+| `template/mcp/` | `scripts/agent-session.mjs`: arranque de sesión que registra y activa los MCPs en cada herramienta |
+| `template/adapters/{claude,cursor}-mcp/` | Hooks de arranque de sesión de las herramientas que los soportan |
 | `template/adapters/<herramienta>/` | Adaptadores por herramienta: sólo apuntan a `AGENTS.md` |
 | `engines/graphify/{code,docs}/` | Motores de graphify, copiados tal cual a `scripts/graphify/` |
 | `BOOTSTRAP.md` | Protocolo para que un agente instale el harness en un repo |
@@ -40,7 +44,8 @@ mantener la plantilla; las del harness generado están en `template/core/AGENTS.
 ## Verificación
 
 - `npm test`: render, validación, generación con la spec de ejemplo y con una mínima, `harness check`
-  del resultado, `new-spec`/`next-dec`, fusión con un repo existente y los tests del motor `docs`.
+  del resultado, `new-spec`/`next-dec`, el bump de versión con commits reales, el registro de MCPs
+  con una máquina falsa (no toca la tuya), fusión con un repo existente y los tests del motor `docs`.
 - El motor `code` necesita `typescript`: se prueba generando en un directorio con `typescript`
   instalado y corriendo `node --test scripts/graphify/graphify.test.mjs` ahí.
 - Un cambio en un adaptador se comprueba en la herramienta real; si no se pudo, se dice.
