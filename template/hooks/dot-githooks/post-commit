@@ -4,6 +4,9 @@
 [ -n "$HARNESS_HOOK" ] && exit 0
 export HARNESS_HOOK=1
 ROOT="$(git rev-parse --show-toplevel)"
+GITDIR="$(git rev-parse --git-dir)"
+# En medio de un rebase o un cherry-pick git está reescribiendo commits: ni versión ni mapa.
+if [ -d "$GITDIR/rebase-merge" ] || [ -d "$GITDIR/rebase-apply" ] || [ -f "$GITDIR/CHERRY_PICK_HEAD" ]; then exit 0; fi
 {{#versioning}}
 # La versión sube según el encabezado del commit (AGENTS.md, «Versionado»).
 VERSION_BRANCHES="{{trunk}}" node "$ROOT/scripts/bump-version.mjs"

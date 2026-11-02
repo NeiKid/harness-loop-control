@@ -1,3 +1,11 @@
+---
+type: Idea Vault
+title: "Baúl de ideas"
+description: "Ideas del owner sin priorizar; no son trabajo planificado."
+tags: [harness, ideas]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # IDEAS_VAULT — Baúl de ideas
 
 Ideas del owner para retomar más adelante. **No son decisiones ni trabajo planificado**: no entran

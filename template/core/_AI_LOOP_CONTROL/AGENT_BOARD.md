@@ -1,3 +1,11 @@
+---
+type: Agent Board
+title: "Tablero de agentes"
+description: "Quién trabaja en qué y con qué límites."
+tags: [harness, agentes]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # Tablero de agentes — vivo
 
 > Quién trabaja en qué y con qué límites. Un agente se identifica por herramienta y modelo (el

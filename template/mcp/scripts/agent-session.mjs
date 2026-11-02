@@ -59,7 +59,8 @@ function fromUserConfigs(name) {
     readJson(join(HOME, '.codeium', 'windsurf', 'mcp_config.json'))?.mcpServers?.[name],
   ]
   const hit = entries.find((e) => e?.command)
-  return hit ? { command: hit.command, args: hit.args ?? [], ...(hit.env && Object.keys(hit.env).length ? { env: hit.env } : {}) } : null
+  // Sólo command y args: el env de un MCP puede traer tokens, y estos archivos viven dentro del repo.
+  return hit ? { command: hit.command, args: hit.args ?? [] } : null
 }
 
 const FALLBACKS = {
@@ -96,7 +97,7 @@ export const WRITERS = {
     file: 'opencode.json',
     json: (current, servers) => ({
       $schema: 'https://opencode.ai/config.json',
-      ...mergeKey('mcp', (s) => ({ type: 'local', command: [s.command, ...s.args], enabled: true, ...(s.env ? { environment: s.env } : {}) }))(current, servers),
+      ...mergeKey('mcp', (s) => ({ type: 'local', command: [s.command, ...s.args], enabled: true }))(current, servers),
     }),
   },
   codex: { file: '.codex/config.toml', toml: true },

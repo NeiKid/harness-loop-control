@@ -1,3 +1,11 @@
+---
+type: Loop State
+title: "Estado del loop"
+description: "Spec activa, fase y siguiente checkpoint de cada producto."
+tags: [harness, estado]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # Estado del loop — vivo
 
 > Una sección por producto; cada una se actualiza por separado. Es una foto del presente: se

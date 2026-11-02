@@ -1,3 +1,11 @@
+---
+type: Spec Index
+title: "Índice de specs"
+description: "Estado de cada spec del repo y cómo crear una nueva."
+tags: [harness, specs]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # Índice de specs
 
 Una carpeta por spec, `<PREFIJO>-S<NN>-<slug>/`, con tres archivos: `spec.md` (qué y por qué),

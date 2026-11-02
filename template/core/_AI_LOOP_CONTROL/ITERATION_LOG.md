@@ -1,3 +1,11 @@
+---
+type: Iteration Log
+title: "Registro de iteraciones"
+description: "Bitácora append-only: qué se hizo en cada iteración, qué se verificó y qué no."
+tags: [harness, bitacora]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # Registro de iteraciones — append-only
 
 Una entrada por iteración, al final del archivo. No se edita ni se reordena: una corrección es una

@@ -16,6 +16,7 @@ fi
 # En post-merge git todavía no borró MERGE_HEAD y un amend se niega. El merge commit ya existe
 # (HEAD tiene los dos padres y el segundo es MERGE_HEAD), así que esos restos se pueden limpiar.
 GITDIR="$(git rev-parse --git-dir)"
+if [ -d "$GITDIR/rebase-merge" ] || [ -d "$GITDIR/rebase-apply" ]; then exit 0; fi
 if [ -f "$GITDIR/MERGE_HEAD" ] && [ "$(cat "$GITDIR/MERGE_HEAD")" = "$(git rev-parse HEAD^2)" ]; then
   rm -f "$GITDIR/MERGE_HEAD" "$GITDIR/MERGE_MSG" "$GITDIR/MERGE_MODE"
 fi

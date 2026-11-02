@@ -1,3 +1,11 @@
+---
+type: Guide
+title: "Bus operativo"
+description: "Qué es cada archivo del bus, el formato de una decisión y el protocolo de trabajo."
+tags: [harness, guia]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # Bus operativo — {{project_title}}
 
 Esta carpeta contiene el estado que cualquier agente (de cualquier proveedor) o persona debe leer

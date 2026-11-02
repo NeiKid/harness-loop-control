@@ -20,6 +20,9 @@ algo concreto.
 
 ## Índice
 
+- [Qué arma en tu repo](#qué-arma-en-tu-repo)
+- [Cómo fluye el trabajo](#cómo-fluye-el-trabajo)
+- [Los componentes, uno por uno](#los-componentes-uno-por-uno)
 - [En 5 minutos](#en-5-minutos)
 - [Qué te queda en el repo](#qué-te-queda-en-el-repo)
 - [El día a día](#el-día-a-día)
@@ -27,6 +30,106 @@ algo concreto.
 - [Si algo no funciona](#si-algo-no-funciona)
 - [Referencia: la spec del harness](#referencia-la-spec-del-harness)
 - [Mantener esta plantilla](#mantener-esta-plantilla)
+- [Licencia](#licencia)
+
+---
+
+## Qué arma en tu repo
+
+Escribes una spec del harness, el generador la lee y deja armado este stack. Todo vive en el repo,
+salvo los MCPs, que están instalados en tu máquina y se conectan solos.
+
+```mermaid
+flowchart LR
+  spec["harness.spec.json<br/>(lo que describes)"] --> gen["bin/harness-init.mjs<br/>(el generador)"]
+  gen --> repo
+
+  subgraph repo["Tu repo"]
+    direction TB
+    subgraph reglas["Reglas: un solo canon"]
+      agents["AGENTS.md"]
+      adapters["Adaptadores<br/>CLAUDE.md · GEMINI.md · Copilot<br/>Cursor · Windsurf · Cline"]
+      adapters -->|apuntan a| agents
+    end
+    subgraph conocimiento["Conocimiento: bundles OKF v0.2"]
+      bus["_AI_LOOP_CONTROL/<br/>estado vivo · bitácora · decisiones"]
+      specs["specs/<br/>spec · plan · pasos"]
+      docs["docs/"]
+      bus --- specs
+    end
+    subgraph herramientas["Herramientas (Node, sin dependencias)"]
+      harness["harness.mjs<br/>check · new-spec · next-dec"]
+      session["agent-session.mjs<br/>arranque de sesión"]
+      bump["bump-version.mjs<br/>versión automática"]
+      graphify["Graphify<br/>mapa versionado"]
+    end
+    subgraph automatico["Automático"]
+      hooks["Hooks de git<br/>post-commit · post-merge"]
+      ci["CI de GitHub<br/>harness check · mapa al día"]
+    end
+    hooks --> bump
+    hooks --> graphify
+    ci --> harness
+    harness -.valida.-> conocimiento
+    graphify -.mapea.-> conocimiento
+  end
+
+  subgraph maquina["Tu máquina"]
+    ponytail["MCP Ponytail"]
+    cbm["MCP codebase-memory"]
+  end
+  session -->|registra y activa| maquina
+```
+
+## Cómo fluye el trabajo
+
+Así se ve una sesión de punta a punta, con cualquier agente:
+
+```mermaid
+flowchart TD
+  inicio(["Abres una sesión con tu agente"]) --> boot["Arranque de sesión<br/>agent-session.mjs start"]
+  boot --> mcps["Registra los MCPs, indexa el repo<br/>y activa Ponytail"]
+  mcps --> read["El agente lee AGENTS.md,<br/>LOOP_STATE y ACTION_QUEUE"]
+  read --> size{"¿Qué tamaño tiene<br/>lo que pides?"}
+
+  size -->|Chico: una sesión| direct["Lo hace y lo verifica"]
+  size -->|Grande o cambia un contrato| spec["new-spec → spec.md<br/>requisitos con criterio de aceptación"]
+  spec --> approve{"¿El owner<br/>la aprueba?"}
+  approve -->|No: preguntas abiertas| spec
+  approve -->|Sí: verified + status stable| plan["plan.md<br/>cómo, qué toca, decisiones"]
+  plan --> tasks["tasks.md<br/>pasos chicos con su verificación"]
+  tasks --> loop["Construye paso a paso"]
+  loop --> verify["Verificación final<br/>evidencia por requisito"]
+
+  direct --> record
+  verify --> record["Registra: decisiones en el ledger,<br/>iteración en la bitácora"]
+  record --> commit["Commit en la rama principal"]
+  commit --> auto["Hooks: sube la versión<br/>y regenera el mapa"]
+  auto --> check["harness check<br/>(local y en CI)"]
+  check --> handoff(["Relevo: nota en HEARTBEAT<br/>para la próxima sesión"])
+  handoff -.siguiente sesión.-> inicio
+```
+
+## Los componentes, uno por uno
+
+| Componente | Qué hace | Cuándo actúa | Dónde vive | ¿Se puede apagar? |
+|---|---|---|---|---|
+| **Spec del harness** | Describe tu repo: productos, owners, ramas, cómo se verifica cada parte y qué módulos quieres. | Una vez, al instalar; después manda `harness.json`. | `harness.spec.json` → `_AI_LOOP_CONTROL/harness.json` | — |
+| **Generador** | Valida la spec y crea todos los archivos, sin pisar los que ya existen. | Al instalar o al reinstalar. | `bin/harness-init.mjs` (en esta plantilla) | — |
+| **Canon** | Las reglas de la casa: cómo se trabaja, qué está prohibido, cómo se verifica. Es el único lugar con reglas. | Lo lee el agente al empezar cada sesión. | `AGENTS.md` | No |
+| **Adaptadores** | Hacen que cada herramienta lea el canon. No tienen reglas propias. | Los carga la herramienta al abrir el repo. | `CLAUDE.md`, `GEMINI.md`, `.cursor/`, `.github/`, `.windsurf/`, `.clinerules/` | Sí: `adapters` |
+| **Bus de estado** | La memoria del trabajo: en qué estamos, qué sigue, quién hace qué y la nota de relevo. | Se lee al empezar y se reescribe al cambiar de tarea. | `_AI_LOOP_CONTROL/LOOP_STATE.md`, `ACTION_QUEUE.md`, `AGENT_BOARD.md`, `HEARTBEAT.json` | No |
+| **Bitácora y decisiones** | El historial que no se borra: qué se hizo en cada iteración y cada decisión con su porqué. | Al cerrar una iteración o tomar una decisión. | `ITERATION_LOG.md`, `DECISION_LEDGER.jsonl` | No |
+| **Specs** | El trabajo grande se escribe antes de construirse: qué y por qué, cómo, y los pasos con su verificación. | Cuando pides algo de varias sesiones o que cambia un contrato. | `_AI_LOOP_CONTROL/specs/<id>/spec.md`, `plan.md`, `tasks.md` | No |
+| **OKF** | Pone a todos los documentos en el formato abierto de Google: frontmatter con tipo, autor, quién lo aprobó y estado. | Cada vez que se crea o cambia un documento. | El frontmatter de cada `.md` de `_AI_LOOP_CONTROL/` y `docs/` | No |
+| **`harness.mjs`** | Crea specs (`new-spec`), da el próximo número de decisión (`next-dec`) y revisa que todo cuadre (`check`): ledger, heartbeat, índice de specs y OKF. | Cuando lo corres, al cerrar una sesión y en CI. | `scripts/harness.mjs` | No |
+| **Arranque de sesión** | Encuentra los MCPs de tu máquina, los registra en cada herramienta, indexa el repo y le dice al agente qué activar. | Al abrir cada sesión (hook en Claude Code y Cursor; el agente en las demás) y en `npm install`. | `scripts/agent-session.mjs` | Sí: sin Ponytail ni codebase-memory no se genera |
+| **Ponytail** | Hace que el agente busque el cambio más chico que resuelve todo, sin agregar lo que nadie pidió. | Toda la sesión. | MCP en tu máquina + resumen en `AGENTS.md` | Sí: `ponytail.enabled` |
+| **Codebase memory** | Un índice del código en tu máquina para responder preguntas de estructura y relaciones. | Se indexa al arrancar la sesión; el agente lo consulta cuando lo necesita. | MCP en tu máquina | Sí: `codebase_memory.enabled` |
+| **Graphify** | Un mapa versionado del código (o de los documentos): quién usa qué y qué se rompe si tocas algo. | Se consulta a pedido; se regenera solo en cada commit en la rama principal. | `scripts/graphify/`, `.graphify/graph.json` | Sí: `graphify.engine: none` |
+| **Versión automática** | Sube la versión según el encabezado del commit (`feat`, `fix`, `feat!`). | En cada commit o merge en la rama principal. | `scripts/bump-version.mjs` | Sí: `versioning.enabled` |
+| **Hooks de git** | Corren la versión y el mapa dentro del mismo commit. No frenan nunca un commit y se apagan durante un rebase. | Después de cada commit y de cada merge local. | `.githooks/post-commit`, `post-merge` | Se apagan si no hay versión ni mapa |
+| **CI** | Repite el `check` y verifica que el mapa esté al día en cada push y PR. | En GitHub, en cada push a las ramas principales y en cada PR. | `.github/workflows/harness.yml` | Sí: `ci: none` |
 
 ---
 
@@ -112,6 +215,36 @@ Dos tipos de archivo, dos formas de tratarlos:
 - **Vivos** (estado, cola, tablero, heartbeat): se **reescriben**. Son una foto del presente.
 - **Históricos** (bitácora, decisiones): solo se **agregan** entradas al final. Si algo estuvo mal, se
   agrega una corrección que apunta a la entrada original.
+
+### Todo el conocimiento en formato OKF
+
+`_AI_LOOP_CONTROL/` y `docs/` siguen el
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+(OKF) v0.2, el estándar abierto de Google para guardar conocimiento como markdown con frontmatter
+YAML. Cada documento arranca con un bloque así:
+
+```yaml
+---
+type: Spec                                   # qué clase de documento es (lo único obligatorio)
+title: "API-S01 — Login con SSO"
+description: "Una frase que lo resume."
+tags: [spec, API]
+status: draft                                # draft | stable | deprecated
+generated: { by: codex/gpt-5, at: 2026-11-02T10:00:00Z }     # quién lo escribió y cuándo
+verified: { by: human:tu-usuario, at: 2026-11-03T09:00:00Z } # quién lo aprobó
+---
+```
+
+Con eso:
+
+- **Cualquier herramienta lo entiende**: un agente, un buscador o un catálogo que hable OKF lee
+  tus specs y decisiones sin adaptarse a tu repo.
+- **Queda claro qué está aprobado**: una spec que el owner aprobó lleva su nombre en `verified`.
+  OKF la cuenta como «revisada por una persona», a diferencia de lo que solo escribió un agente.
+- **Graphify lo aprovecha**: el mapa de documentos indexa `type`, `title`, `description` y `tags`, así
+  que `npm run graph -- tag spec` o `search` encuentran cualquier documento.
+- **`harness check` lo valida**: avisa si un documento no tiene frontmatter, le falta `type`, o si un
+  `index.md` está mal armado.
 
 ---
 
@@ -372,8 +505,11 @@ Las reglas para modificar la plantilla están en [`AGENTS.md`](AGENTS.md). Antes
 cambio:
 
 ```bash
-npm test
+npm test                 # generador, plantilla, hooks, MCPs (con una máquina falsa), OKF y motor docs
+npm run test:code        # motor code de Graphify (necesita: npm install --no-save typescript)
 ```
+
+CI corre los dos en Linux y Windows en cada push y PR (`.github/workflows/test.yml`).
 
 ### Graphify
 
@@ -382,3 +518,10 @@ Graphify es una utilidad aparte que esta plantilla integra. Sus dos motores, `co
 copia a `scripts/graphify/` del repo destino. Para actualizar Graphify, se reemplaza la carpeta del
 motor por la versión nueva; no se edita acá. Lo que el harness espera de un motor está en
 [`engines/graphify/README.md`](engines/graphify/README.md).
+
+---
+
+## Licencia
+
+[MIT](LICENSE) © 2026 NeiKid. Puedes usarla, copiarla, modificarla y distribuirla, también con fines
+comerciales, siempre que conserves el aviso de copyright y la licencia.

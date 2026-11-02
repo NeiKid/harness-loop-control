@@ -4,7 +4,8 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -137,6 +138,56 @@ test('agent-session: registra los MCPs de la máquina en cada herramienta, sin p
   const hook = session('start', '--format', 'claude')
   assert.equal(hook.status, 0)
   assert.match(JSON.parse(hook.stdout).hookSpecificOutput.additionalContext, /ponytail_instructions.*"full"/)
+})
+
+test('OKF: el harness generado es conforme y el check detecta lo que no lo es', () => {
+  const dir = fresh()
+  generate({ spec: example, target: dir })
+  const env = { ...process.env, HARNESS_ACTOR: 'codex/gpt-5' }
+  assert.equal(spawnSync('node', ['scripts/harness.mjs', 'new-spec', 'API', 'login'], { cwd: dir, env }).status, 0)
+  const spec = readFileSync(join(dir, '_AI_LOOP_CONTROL/specs/API-S01-login/spec.md'), 'utf-8')
+  assert.match(spec, /^---\ntype: Spec\n/)
+  assert.match(spec, /generated: \{ by: codex\/gpt-5, at: \d{4}-\d\d-\d\dT[\d:]+Z \}/)
+  assert.match(readFileSync(join(dir, '_AI_LOOP_CONTROL/index.md'), 'utf-8'), /^---\nokf_version: "0\.2"\n---/)
+  assert.equal(node(['scripts/harness.mjs', 'check'], dir).status, 0)
+
+  writeFileSync(join(dir, 'docs/sin-type.md'), '---\ntitle: x\n---\n\nhola\n')
+  writeFileSync(join(dir, 'docs/sin-frontmatter.md'), '# hola\n')
+  writeFileSync(join(dir, '_AI_LOOP_CONTROL/specs/index.md'), '---\ntype: X\n---\n')
+  const check = node(['scripts/harness.mjs', 'check'], dir)
+  assert.equal(check.status, 1)
+  assert.match(check.stderr, /docs\/sin-type\.md: el frontmatter no tiene type/)
+  assert.match(check.stderr, /docs\/sin-frontmatter\.md: falta frontmatter/)
+  assert.match(check.stderr, /specs\/index\.md: index\.md no lleva frontmatter/)
+})
+
+test('CLI: genera en un directorio vacío sin package.json y termina bien', () => {
+  const dir = fresh()
+  const specPath = join(fresh(), 'spec.json')
+  writeFileSync(specPath, JSON.stringify(minimal))
+  const run = node([fileURLToPath(new URL('../bin/harness-init.mjs', import.meta.url)), '--spec', specPath, '--target', dir], dir)
+  assert.equal(run.status, 0, run.stderr)
+  assert.match(run.stdout, /harness: ok/)
+})
+
+test('robustez: --force no pisa .gitattributes, docs/ previo no rompe el check, BOM y valores inseguros', () => {
+  const dir = fresh()
+  writeFileSync(join(dir, '.gitattributes'), '*.png binary\n')
+  mkdirSync(join(dir, 'docs'))
+  writeFileSync(join(dir, 'docs/manual.md'), '# Manual previo\n')
+  const { log } = generate({ spec: example, target: dir, force: true })
+  assert.match(readFileSync(join(dir, '.gitattributes'), 'utf-8'), /^\*\.png binary\n/)
+  assert.ok(!existsSync(join(dir, 'docs/index.md')))
+  assert.ok(log.warn.some((w) => w.includes('docs/manual.md')))
+  assert.equal(node(['scripts/harness.mjs', 'check'], dir).status, 0)
+
+  writeFileSync(join(dir, '_AI_LOOP_CONTROL/bom.md'), '﻿---\ntype: Guide\n---\n\nhola\n')
+  assert.equal(node(['scripts/harness.mjs', 'check'], dir).status, 0)
+
+  const bad = { ...minimal, project: { name: 'x', title: 'Con "comillas"' }, branches: { trunk: 'dev"; rm -rf ~; "' } }
+  const errors = validateSpec(bad)
+  assert.ok(errors.some((e) => e.includes('project.title')))
+  assert.ok(errors.some((e) => e.includes('branches.trunk')))
 })
 
 test('no pisa un repo existente: completa .gitattributes y package.json', () => {

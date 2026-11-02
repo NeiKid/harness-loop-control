@@ -35,9 +35,17 @@ export function validateSpec(spec) {
   const errors = []
   const need = (cond, msg) => cond || errors.push(msg)
   need(/^[a-z0-9][a-z0-9-]*$/.test(spec.project?.name ?? ''), 'project.name: minúsculas, números y guiones')
-  need(spec.project?.title, 'project.title es obligatorio')
+  // Estos valores terminan dentro de YAML, JSON y scripts de shell: sin comillas ni saltos de línea.
+  need(spec.project?.title && !/["\n\\]/.test(spec.project.title), 'project.title es obligatorio, sin comillas ni saltos de línea')
   need(Array.isArray(spec.owners) && spec.owners.length > 0, 'owners: al menos uno')
-  for (const [i, o] of (spec.owners ?? []).entries()) need(o.name && o.handle, `owners[${i}]: name y handle`)
+  for (const [i, o] of (spec.owners ?? []).entries()) {
+    need(o.name && /^[A-Za-z0-9._-]+$/.test(o.handle ?? ''), `owners[${i}]: name, y handle con letras, números, punto, guion o guion bajo`)
+  }
+  for (const key of ['trunk', 'stable']) {
+    const branch = spec.branches?.[key]
+    need(branch === undefined || (/^[A-Za-z0-9._/-]+$/.test(branch) && !branch.includes('..')), `branches.${key}: nombre de rama inválido`)
+  }
+  need(Array.isArray(spec.rules?.extra ?? []) && Array.isArray(spec.verification ?? []), 'rules.extra y verification son listas')
   need(Array.isArray(spec.products) && spec.products.length > 0, 'products: al menos uno')
   const seen = new Set()
   for (const [i, p] of (spec.products ?? []).entries()) {
@@ -78,6 +86,9 @@ export function buildContext(spec, now = new Date()) {
     version_file_list: spec.versioning?.files ?? ['package.json'],
     version_files: (spec.versioning?.files ?? ['package.json']).map((f) => `\`${f}\``).join(', '),
     hooks: versioning || engine !== 'none',
+    // Actor OKF (§7) de lo que escribe el generador: <producer>/<version>.
+    generator_actor: `harness-loop-control/${JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf-8')).version}`,
+    owner_actor: `human:${spec.owners[0].handle}`,
     project_name: spec.project.name,
     project_title: spec.project.title,
     mission: spec.project.mission || 'TODO(owner): qué resuelve este repo, para quién y qué queda fuera.',
@@ -215,19 +226,41 @@ function appendMissingLines(existing, content) {
   return missing.length ? `${existing.replace(/\n?$/, '\n')}\n# Harness (generado por harness-loop-control)\n${missing.join('\n')}\n` : null
 }
 
+/** Documentos de un docs/ existente que no abren con frontmatter (sin contar index.md ni log.md). */
+function nonOkfDocs(target) {
+  const dir = join(target, 'docs')
+  if (!existsSync(dir)) return []
+  return walk(dir)
+    .filter((f) => f.endsWith('.md') && !/[\\/](index|log)\.md$/.test(f))
+    .filter((f) => !readFileSync(f, 'utf-8').replace(/^﻿/, '').startsWith('---'))
+    .map((f) => relative(target, f).split(sep).join('/'))
+}
+
 export function generate({ spec, target, dryRun = false, force = false, now = new Date() }) {
   const { ctx, files } = plan(spec, now)
   const log = { created: [], skipped: [], merged: [], warn: [] }
+  // Un docs/ previo sin frontmatter OKF no se convierte en bundle: el check fallaría de entrada.
+  const legacyDocs = nonOkfDocs(target)
+  if (legacyDocs.length) {
+    log.warn.push(
+      `docs/ ya tiene documentos sin frontmatter OKF (${legacyDocs.slice(0, 3).join(', ')}${legacyDocs.length > 3 ? ', …' : ''}): ` +
+        'no se crea docs/index.md y docs/ queda fuera del check hasta migrarlo (frontmatter con type + docs/index.md con okf_version)'
+    )
+  }
   for (const { path, content } of files) {
     const abs = join(target, path)
+    if (path === 'docs/index.md' && legacyDocs.length) continue
+    // .gitattributes y .gitignore siempre se completan, también con --force: pisarlos borra reglas ajenas.
+    if (existsSync(abs) && (path === '.gitattributes' || path === '.gitignore')) {
+      const merged = appendMissingLines(readFileSync(abs, 'utf-8'), content)
+      if (merged) {
+        log.merged.push(path)
+        if (!dryRun) writeFileSync(abs, merged)
+      }
+      continue
+    }
     if (existsSync(abs) && !force) {
-      if (path === '.gitattributes' || path === '.gitignore') {
-        const merged = appendMissingLines(readFileSync(abs, 'utf-8'), content)
-        if (merged) {
-          log.merged.push(path)
-          if (!dryRun) writeFileSync(abs, merged)
-        }
-      } else log.skipped.push(path)
+      log.skipped.push(path)
       continue
     }
     log.created.push(path)
@@ -303,7 +336,9 @@ function main(argv) {
   const check = run('node', ['scripts/harness.mjs', 'check'], target)
   notes.push(check.status === 0 ? check.stdout.trim() : `harness check FALLÓ:\n${check.stderr}`)
 
-  const todos = log.created.filter((p) => !VERBATIM.test(p) && readFileSync(join(target, p), 'utf-8').includes('TODO(owner)'))
+  const todos = log.created
+    .map((entry) => entry.split(' (')[0]) // «package.json (version, …)» → package.json
+    .filter((p) => !VERBATIM.test(p) && existsSync(join(target, p)) && readFileSync(join(target, p), 'utf-8').includes('TODO(owner)'))
   if (todos.length) notes.push(`quedan TODO(owner) para completar en: ${todos.join(', ')}`)
   show('Después de generar', notes)
   if (check.status !== 0) process.exit(1)

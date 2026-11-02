@@ -1,17 +1,18 @@
 ---
-type: spec
+type: Spec
 title: "<<ID>> — <<TITULO>>"
 description: "Qué y por qué de <<TITULO>>."
 tags: [spec, <<PREFIJO>>]
-created_at: <<FECHA>>
-updated_at: <<FECHA>>
+status: draft
+generated: { by: <<AUTOR>>, at: <<AHORA>> }
 ---
 
 # <<ID>> — <<TITULO>>
 
 - **Estado:** Borrador (manda `specs/README.md`)
 - **Producto:** `<<PREFIJO>>`
-- **Aprobada por:** — (owner y fecha; sin esto no se escribe código)
+- **Aprobación:** el owner que la aprueba se agrega en `verified` del frontmatter
+  (`{ by: human:<handle>, at: <fecha ISO> }`) y `status` pasa a `stable`; sin eso no se escribe código.
 - **Decisiones:** —
 
 ## Problema

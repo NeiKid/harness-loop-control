@@ -1,10 +1,10 @@
 ---
-type: plan
+type: Plan
 title: "<<ID>> — Plan"
 description: "Cómo se construye <<TITULO>>."
 tags: [plan, <<PREFIJO>>]
-created_at: <<FECHA>>
-updated_at: <<FECHA>>
+status: draft
+generated: { by: <<AUTOR>>, at: <<AHORA>> }
 ---
 
 # <<ID>> — Plan

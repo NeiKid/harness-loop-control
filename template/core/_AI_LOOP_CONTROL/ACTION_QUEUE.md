@@ -1,3 +1,11 @@
+---
+type: Action Queue
+title: "Cola de acciones"
+description: "Las próximas tres prioridades de cada producto y lo que espera al owner."
+tags: [harness, prioridades]
+generated: { by: {{generator_actor}}, at: {{now}} }
+---
+
 # Cola de acciones — vivo
 
 > Máximo **tres** prioridades por producto, en orden. Cada una apunta a su spec o al paso concreto

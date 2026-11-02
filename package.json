@@ -1,6 +1,6 @@
 {
   "name": "harness-loop-control",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "NeiKid",
   "license": "MIT",
   "private": true,
@@ -10,7 +10,8 @@
   },
   "scripts": {
     "init": "node bin/harness-init.mjs",
-    "test": "node --test \"test/*.test.mjs\" engines/graphify/docs/graphify.test.mjs"
+    "test": "node --test \"test/*.test.mjs\" engines/graphify/docs/graphify.test.mjs",
+    "test:code": "node --test engines/graphify/code/graphify.test.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -103,6 +103,45 @@ Estados de una spec: **Borrador**, **Aprobada**, **En curso**, **Verificada**, *
   spec nueva, no se suma en silencio.
 - Una spec **Cerrada** no se reescribe: un cambio posterior es una spec nueva que la referencia.
 
+## Documentos: OKF
+
+`_AI_LOOP_CONTROL/` y `docs/` son bundles de [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+v0.2: carpetas de markdown con frontmatter YAML, legibles igual por personas y por agentes.
+`node scripts/harness.mjs check` valida que sean conformes.
+
+```yaml
+---
+type: Spec                     # obligatorio: qué clase de documento es
+title: "{{fallback_prefix}}-S01 — Login con SSO"
+description: "Una frase que lo resume (la usan los índices y las búsquedas)."
+tags: [spec, {{fallback_prefix}}]
+status: draft                  # draft | stable | deprecated
+generated: { by: <actor>, at: 2026-01-31T12:00:00Z }
+verified:                      # quién lo confirmó; un owner = revisado por una persona
+  - { by: {{owner_actor}}, at: 2026-02-01T09:00:00Z }
+---
+```
+
+- **Todo `.md` dentro de esos bundles lleva frontmatter con `type`**; `title`, `description` y `tags` se
+  ponen siempre. Un documento nuevo en `docs/` se agrega también a `docs/index.md` con su descripción.
+- `index.md` y `log.md` son nombres reservados: no se usan para documentos y no llevan frontmatter,
+  salvo el `index.md` raíz de cada bundle, que declara `okf_version: "0.2"`.
+- **Actores** (OKF §7): un agente se escribe `<herramienta>/<modelo>` (por ejemplo
+  `claude-code/claude-opus-5-5` o `codex/gpt-5`), una persona `human:<handle>`, un proceso
+  `process:<nombre>`. Un agente que crea una spec define antes `HARNESS_ACTOR` con su actor.
+- Quien cambia el contenido de un documento actualiza `generated` (`by` y `at`); quien lo confirma se
+  agrega a `verified`, sin borrar a los anteriores. Las fechas van en ISO 8601 con zona (`Z` o `-03:00`).
+- **Una spec aprobada** lleva al owner en `verified` y `status: stable`; una descartada,
+  `status: deprecated`. El estado del ciclo (Borrador…Cerrada) sigue mandando en `specs/README.md`.
+- **Enlaces entre documentos: relativos** (`../specs/README.md`), no con `/` inicial. OKF lee `/` desde
+  la raíz del bundle{{#graphify}} y graphify desde la raíz del repo; el relativo significa lo mismo para los dos{{/graphify}}.
+- Los archivos fuera de los bundles (`AGENTS.md`, `README.md`, adaptadores) no llevan frontmatter: las
+  herramientas los leen tal cual.
+{{#graphify_docs}}
+- El mapa (graphify, motor `docs`) indexa este mismo frontmatter: `npm run graph -- search`, `tag` y
+  `doc` buscan por `type`, `title`, `description` y `tags`, y `broken` encuentra enlaces rotos.
+{{/graphify_docs}}
+
 ## Cómo trabajar (el loop)
 
 1. Leer el estado vivo (`LOOP_STATE.md`, `ACTION_QUEUE.md`) y la spec activa antes de escribir.

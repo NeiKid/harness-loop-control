@@ -34,7 +34,7 @@ mantener la plantilla; las del harness generado están en `template/core/AGENTS.
 - Los archivos `.mjs`, `.cjs` y `.js` se copian sin renderizar; el resto pasa por `lib/render.mjs`, y
   un `{{var}}` sin valor es un error. Los dotfiles de la plantilla se escriben `dot-<nombre>` para que
   no se activen en este repo.
-- Los marcadores `<<ID>>`, `<<PREFIJO>>`, `<<TITULO>>`, `<<FECHA>>` de `specs/_TEMPLATE/` no son del
+- Los marcadores `<<ID>>`, `<<PREFIJO>>`, `<<TITULO>>`, `<<AUTOR>>`, `<<AHORA>>` de `specs/_TEMPLATE/` no son del
   generador: los rellena `scripts/harness.mjs new-spec` en el repo generado.
 - Graphify es una utilidad aparte: `engines/graphify/` es su integración, no su código fuente. Se
   actualiza reemplazando la carpeta del motor por la versión nueva de Graphify, y una mejora al motor

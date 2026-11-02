@@ -10,7 +10,7 @@
  * máquina, en CI y para cualquier agente.
  */
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs'
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, relative, basename, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -19,6 +19,9 @@ const SPECS = join(BUS, 'specs')
 const INDEX_MARKER = '<!-- harness:specs-index'
 const REQUIRED = ['id', 'type', 'decision', 'rationale', 'status', 'recorded_at']
 const STATUSES = ['vigente', 'reemplazada', 'revocada']
+// Bundles Open Knowledge Format del repo (AGENTS.md, «Documentos: OKF»). docs/ es opcional: sólo se
+// valida si su index.md declara okf_version (un docs/ previo sin migrar no rompe el check).
+const OKF_BUNDLES = [{ dir: '_AI_LOOP_CONTROL', required: true }, { dir: 'docs', required: false }]
 
 export function loadPrefixes(root = ROOT) {
   const config = JSON.parse(readFileSync(join(root, '_AI_LOOP_CONTROL', 'harness.json'), 'utf-8'))
@@ -99,6 +102,65 @@ export function checkSpecs(root, prefixes) {
   return problems
 }
 
+/**
+ * Frontmatter YAML mínimo: sólo claves de primer nivel. Devuelve null si el bloque no cierra o tiene
+ * una línea de primer nivel que no es `clave: valor`.
+ * shortcut: no es un parser YAML completo; alcanza para validar OKF (claves y `type`), no para leer valores anidados.
+ */
+export function readFrontmatter(text) {
+  // Sin BOM: algunos editores de Windows lo agregan y el bloque dejaría de empezar en la primera línea.
+  const lines = text.replace(/^﻿/, '').replace(/\r\n/g, '\n').split('\n')
+  if (lines[0] !== '---') return { meta: null, hasBlock: false }
+  const end = lines.indexOf('---', 1)
+  if (end === -1) return { meta: null, hasBlock: true }
+  const meta = {}
+  for (const line of lines.slice(1, end)) {
+    if (!line.trim() || /^\s/.test(line) || line.startsWith('#') || line.startsWith('- ')) continue
+    const m = /^([A-Za-z_][\w-]*):(?:\s+(.*))?$/.exec(line)
+    if (!m) return { meta: null, hasBlock: true }
+    meta[m[1]] = (m[2] ?? '').trim().replace(/^(["'])(.*)\1$/, '$2')
+  }
+  return { meta, hasBlock: true }
+}
+
+function listMarkdown(dir, acc = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const abs = join(dir, entry.name)
+    if (entry.isDirectory()) listMarkdown(abs, acc)
+    else if (entry.name.endsWith('.md')) acc.push(abs)
+  }
+  return acc
+}
+
+/**
+ * Conformidad con Open Knowledge Format v0.2 (§11): todo `.md` no reservado tiene frontmatter con
+ * `type`; `index.md` no lleva frontmatter salvo el raíz, que declara `okf_version`; `log.md` tampoco.
+ */
+export function checkOkf(root, bundle, { required = true } = {}) {
+  const base = join(root, bundle)
+  if (!existsSync(base)) return []
+  if (!required) {
+    const index = join(base, 'index.md')
+    if (!existsSync(index) || !readFrontmatter(readFileSync(index, 'utf-8')).meta?.okf_version) return []
+  }
+  const problems = []
+  for (const abs of listMarkdown(base)) {
+    const rel = relative(root, abs).split(sep).join('/')
+    const name = basename(abs)
+    const { meta, hasBlock } = readFrontmatter(readFileSync(abs, 'utf-8'))
+    if (name === 'index.md' && dirname(abs) === base) {
+      if (!meta?.okf_version) problems.push(`${rel}: el index.md raíz del bundle declara okf_version (OKF §12)`)
+    } else if (name === 'index.md' || name === 'log.md') {
+      if (hasBlock) problems.push(`${rel}: ${name} no lleva frontmatter (OKF §8, §9)`)
+    } else if (!meta) {
+      problems.push(`${rel}: falta frontmatter YAML válido (OKF §4.1)`)
+    } else if (!meta.type) {
+      problems.push(`${rel}: el frontmatter no tiene type (OKF §4.1)`)
+    }
+  }
+  return problems
+}
+
 function listSpecDirs(dir) {
   return readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith('_'))
@@ -112,6 +174,7 @@ function check() {
     ...ledger.problems,
     ...checkHeartbeat(readFileSync(join(BUS, 'HEARTBEAT.json'), 'utf-8'), prefixes, ledger.ids),
     ...checkSpecs(ROOT, prefixes),
+    ...OKF_BUNDLES.flatMap(({ dir, required }) => checkOkf(ROOT, dir, { required })),
   ]
   if (problems.length) {
     console.error(`harness: ${problems.length} problema(s)`)
@@ -148,12 +211,15 @@ function newSpec(prefix, slug, title) {
     .map((m) => Number(m[2]))
   const id = `${prefix}-S${String(Math.max(0, ...used) + 1).padStart(2, '0')}`
   const name = `${id}-${slug}`
-  const today = new Date().toISOString().slice(0, 10)
+  const now = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')
+  // Actor OKF (§7): el agente define HARNESS_ACTOR=<herramienta>/<modelo>; una persona, human:<handle>.
+  const actor = process.env.HARNESS_ACTOR || 'process:harness-new-spec'
   const fill = (text) =>
     text
       .replaceAll('<<ID>>', id)
       .replaceAll('<<PREFIJO>>', prefix)
-      .replaceAll('<<FECHA>>', today)
+      .replaceAll('<<AHORA>>', now)
+      .replaceAll('<<AUTOR>>', actor)
       .replaceAll('<<TITULO>>', title || slug.replaceAll('-', ' '))
   mkdirSync(join(SPECS, name))
   for (const file of readdirSync(join(SPECS, '_TEMPLATE'))) {

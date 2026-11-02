@@ -1,0 +1,26 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generador, plantilla y motor docs
+        run: npm test
+      # El motor code de Graphify necesita el parser de TypeScript; la plantilla no tiene dependencias.
+      - name: Motor code de Graphify
+        run: |
+          npm install --no-save --no-package-lock --ignore-scripts typescript@6.0.3
+          npm run test:code

@@ -1,10 +1,10 @@
 ---
-type: tasks
+type: Task List
 title: "<<ID>> — Pasos"
 description: "Pasos y verificación de <<TITULO>>."
 tags: [tasks, <<PREFIJO>>]
-created_at: <<FECHA>>
-updated_at: <<FECHA>>
+status: draft
+generated: { by: <<AUTOR>>, at: <<AHORA>> }
 ---
 
 # <<ID>> — Pasos

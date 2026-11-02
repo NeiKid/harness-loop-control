@@ -1,10 +1,9 @@
 ---
-type: guide
+type: Guide
 title: "Graphify — el mapa del repo"
 description: "Cómo se genera, se mantiene y se consulta el grafo versionado de {{project_title}}."
 tags: [graphify, harness]
-created_at: {{today}}
-updated_at: {{today}}
+generated: { by: {{generator_actor}}, at: {{now}} }
 ---
 
 # Graphify — el mapa del repo
