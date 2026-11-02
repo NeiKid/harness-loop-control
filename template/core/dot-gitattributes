@@ -1,0 +1,16 @@
+# Harness (AGENTS.md, «Flujo de ramas»). Los dos archivos append-only sólo crecen al final, así
+# que dos ramas que agregan entradas a la vez se integran juntando las dos (union), sin conflicto.
+# Que dos decisiones nuevas no compartan número lo controla `node scripts/harness.mjs check`.
+_AI_LOOP_CONTROL/ITERATION_LOG.md merge=union
+_AI_LOOP_CONTROL/DECISION_LEDGER.jsonl merge=union
+_AI_LOOP_CONTROL/** text eol=lf
+{{#graphify}}
+
+# Los hooks corren bajo sh de Git for Windows: CRLF los rompe.
+.githooks/* text eol=lf
+
+# Mapa: generado por `npm run graph:build`. Se commitea (viaja con el repo y CI lo usa), pero se
+# colapsa en los diffs. En un conflicto se conserva el del tronco y el hook lo rehace (driver
+# `ours`, que declara el script `prepare` de package.json).
+.graphify/graph.json linguist-generated=true merge=ours
+{{/graphify}}

@@ -1,0 +1,3 @@
+# Instrucciones del repo
+
+Este repo se rige por [`AGENTS.md`](../AGENTS.md), el canon común a todos los agentes sea cual sea su proveedor. Antes de cualquier tarea, leerlo completo y seguirlo, empezando por su «Orden de lectura». Este archivo es sólo un adaptador: no tiene reglas propias, y una regla nueva se escribe en `AGENTS.md`.

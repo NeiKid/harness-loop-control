@@ -1,0 +1,20 @@
+#!/bin/sh
+# Un `git merge` sin conflictos no dispara post-commit: acá se regenera el mapa al integrar en el
+# tronco. Las guardas dejan afuera lo que no es un merge hecho en local.
+ROOT="$(git rev-parse --show-toplevel)"
+# Fast-forward (un solo padre): no hay merge.
+[ "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3 ] || exit 0
+UP="$(git rev-parse -q --verify '@{u}' 2>/dev/null)"
+if [ -n "$UP" ]; then
+  # El merge ya está en el remoto: vino con un pull y ya lo regeneró quien lo hizo.
+  git merge-base --is-ancestor HEAD "$UP" && exit 0
+  # Merge que crea el propio pull (la rama local con su remoto): no es una integración.
+  [ "$(git rev-parse HEAD^2)" = "$UP" ] && exit 0
+fi
+# En post-merge git todavía no borró MERGE_HEAD y un amend se niega. El merge commit ya existe
+# (HEAD tiene los dos padres y el segundo es MERGE_HEAD), así que esos restos se pueden limpiar.
+GITDIR="$(git rev-parse --git-dir)"
+if [ -f "$GITDIR/MERGE_HEAD" ] && [ "$(cat "$GITDIR/MERGE_HEAD")" = "$(git rev-parse HEAD^2)" ]; then
+  rm -f "$GITDIR/MERGE_HEAD" "$GITDIR/MERGE_MSG" "$GITDIR/MERGE_MODE"
+fi
+GRAPH_BRANCHES="{{trunk}}" node "$ROOT/scripts/graphify/refresh-on-commit.mjs"

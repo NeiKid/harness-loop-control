@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/ponytail-session-start.cjs\""
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "PONYTAIL_LEVEL": "{{ponytail_level}}"
+  }
+}

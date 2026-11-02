@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "updated_at": "{{now}}",
+  "last_decision_id": "{{fallback_prefix}}/dec/001",
+  "branch": "{{trunk}}",
+  "note": "Bootstrap del harness desde harness-loop-control. Siguiente: que un owner revise AGENTS.md y escriba la primera spec.",
+  "products": {
+{{#products}}
+    "{{prefix}}": {
+      "updated_at": "{{now}}",
+      "active_spec": null,
+      "phase": null,
+      "iteration": 0,
+      "next_checkpoint": null,
+      "handoff": "Sin trabajo en curso."
+    }{{comma}}
+{{/products}}
+  }
+}

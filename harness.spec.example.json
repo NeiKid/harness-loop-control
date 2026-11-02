@@ -1,0 +1,43 @@
+{
+  "project": {
+    "name": "mi-proyecto",
+    "title": "Mi Proyecto",
+    "mission": "Una o dos frases: qué resuelve este repo, para quién y qué queda fuera."
+  },
+  "owners": [
+    { "name": "Tu Nombre", "handle": "tu-usuario" }
+  ],
+  "products": [
+    {
+      "prefix": "CORE",
+      "name": "Plataforma",
+      "code": "`src/`, `scripts/`, CI y el harness",
+      "source_of_truth": "`README.md` y `docs/`"
+    },
+    {
+      "prefix": "API",
+      "name": "API pública",
+      "code": "`apps/api`",
+      "source_of_truth": "`docs/api/`"
+    }
+  ],
+  "branches": {
+    "trunk": "dev",
+    "stable": "main"
+  },
+  "verification": [
+    { "change": "`apps/api/**`", "command": "`npm test --workspace apps/api` y su build" },
+    { "change": "`apps/web/**`", "command": "`npm run build --workspace apps/web`; si el cambio es visual, verlo en el navegador" }
+  ],
+  "rules": {
+    "commit_attribution": false,
+    "extra": [
+      "No ejecutar nada contra infraestructura real sin el pedido explícito de un owner."
+    ]
+  },
+  "graphify": { "engine": "code" },
+  "ponytail": { "enabled": true, "level": "full" },
+  "codebase_memory": { "enabled": true },
+  "adapters": ["claude", "codex", "gemini", "copilot", "cursor", "windsurf", "cline", "opencode"],
+  "ci": "github"
+}

@@ -1,0 +1,270 @@
+#!/usr/bin/env node
+/**
+ * Genera el harness de un repo a partir de su spec (`harness.spec.json`).
+ *
+ *   node bin/harness-init.mjs --spec <harness.spec.json> --target <repo> [--dry-run] [--force]
+ *
+ * Nunca pisa un archivo existente salvo con --force; `.gitattributes` y `package.json` se completan
+ * con lo que les falta. Sin dependencias.
+ */
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs'
+import { resolve, dirname, join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
+import { render } from '../lib/render.mjs'
+
+const HERE = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+
+/** Adaptadores por herramienta y lo que generan. Codex y OpenCode leen AGENTS.md sin adaptador. */
+export const ADAPTERS = {
+  claude: ['CLAUDE.md'],
+  codex: [],
+  gemini: ['GEMINI.md'],
+  copilot: ['.github/copilot-instructions.md'],
+  cursor: ['.cursor/rules/harness.mdc'],
+  windsurf: ['.windsurf/rules/harness.md'],
+  cline: ['.clinerules/harness.md'],
+  opencode: [],
+}
+const ENGINES = ['code', 'docs', 'none']
+const LEVELS = ['lite', 'full', 'ultra']
+const VERBATIM = /\.(mjs|cjs|js)$/
+
+export function validateSpec(spec) {
+  const errors = []
+  const need = (cond, msg) => cond || errors.push(msg)
+  need(/^[a-z0-9][a-z0-9-]*$/.test(spec.project?.name ?? ''), 'project.name: minúsculas, números y guiones')
+  need(spec.project?.title, 'project.title es obligatorio')
+  need(Array.isArray(spec.owners) && spec.owners.length > 0, 'owners: al menos uno')
+  for (const [i, o] of (spec.owners ?? []).entries()) need(o.name && o.handle, `owners[${i}]: name y handle`)
+  need(Array.isArray(spec.products) && spec.products.length > 0, 'products: al menos uno')
+  const seen = new Set()
+  for (const [i, p] of (spec.products ?? []).entries()) {
+    need(/^[A-Z][A-Z0-9]{1,7}$/.test(p.prefix ?? ''), `products[${i}].prefix: 2 a 8 mayúsculas o dígitos, empieza con letra`)
+    need(!seen.has(p.prefix), `products[${i}].prefix ${p.prefix} repetido`)
+    seen.add(p.prefix)
+    need(p.name && p.code && p.source_of_truth, `products[${i}]: name, code y source_of_truth`)
+  }
+  need(ENGINES.includes(spec.graphify?.engine ?? 'code'), `graphify.engine: ${ENGINES.join('|')}`)
+  need(LEVELS.includes(spec.ponytail?.level ?? 'full'), `ponytail.level: ${LEVELS.join('|')}`)
+  for (const a of spec.adapters ?? []) need(a in ADAPTERS, `adapters: ${a} desconocido (${Object.keys(ADAPTERS).join(', ')})`)
+  need(['github', 'none'].includes(spec.ci ?? 'github'), 'ci: github|none')
+  return errors
+}
+
+export function buildContext(spec, now = new Date()) {
+  const engine = spec.graphify?.engine ?? 'code'
+  const ponytail = spec.ponytail?.enabled !== false
+  const level = spec.ponytail?.level ?? 'full'
+  const memory = spec.codebase_memory?.enabled !== false
+  const adapters = spec.adapters ?? []
+  const files = adapters.flatMap((a) => ADAPTERS[a]).map((f) => `\`${f}\``)
+  return {
+    project_name: spec.project.name,
+    project_title: spec.project.title,
+    mission: spec.project.mission || 'TODO(owner): qué resuelve este repo, para quién y qué queda fuera.',
+    owners: spec.owners,
+    owners_list: spec.owners.map((o) => `${o.name} (\`${o.handle}\`)`).join(', '),
+    products: spec.products.map((p, i, all) => ({
+      ...p,
+      prefix_lower: p.prefix.toLowerCase(),
+      comma: i < all.length - 1 ? ',' : '',
+    })),
+    fallback_prefix: spec.products[0].prefix,
+    trunk: spec.branches?.trunk ?? 'dev',
+    stable: spec.branches?.stable ?? 'main',
+    verification: spec.verification ?? [],
+    extra_rules: (spec.rules?.extra ?? []).map((rule) => ({ rule })),
+    no_commit_attribution: spec.rules?.commit_attribution !== true,
+    graphify: engine !== 'none',
+    graphify_code: engine === 'code',
+    graphify_docs: engine === 'docs',
+    graphify_engine: engine,
+    ponytail,
+    ponytail_level: level,
+    ponytail_state: ponytail ? `activo (nivel ${level})` : 'desactivado',
+    codebase_memory: memory,
+    codebase_memory_state: memory ? 'como complemento opcional' : 'desactivado',
+    ci_github: (spec.ci ?? 'github') === 'github',
+    adapters_any: files.length > 0,
+    adapter_files: files.length ? files.join(', ') : '`CLAUDE.md`, `GEMINI.md` y similares, si se agregan',
+    today: now.toISOString().slice(0, 10),
+    now: now.toISOString().replace(/\.\d{3}Z$/, 'Z'),
+  }
+}
+
+/** `dot-github/x` → `.github/x`: los dotfiles de la plantilla no se activan en este repo. */
+const targetPath = (rel) => rel.split(/[\\/]/).map((s) => s.replace(/^dot-/, '.')).join('/')
+
+function walk(dir, acc = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) walk(full, acc)
+    else acc.push(full)
+  }
+  return acc
+}
+
+/** Lista de archivos a generar: [{ path, content }], sin tocar el disco. */
+export function plan(spec, now = new Date()) {
+  const ctx = buildContext(spec, now)
+  const adapters = spec.adapters ?? []
+  const layers = [
+    ['template/core', true],
+    ['template/graphify', ctx.graphify],
+    ['template/ci-github', ctx.ci_github],
+    ...adapters.map((a) => [`template/adapters/${a}`, true]),
+    ['template/adapters/claude-ponytail', adapters.includes('claude') && ctx.ponytail],
+  ]
+  const out = []
+  for (const [layer, on] of layers) {
+    const dir = join(HERE, layer)
+    if (!on || !existsSync(dir)) continue
+    for (const file of walk(dir)) {
+      const rel = relative(dir, file).split(sep).join('/')
+      const raw = readFileSync(file, 'utf-8')
+      const content = VERBATIM.test(rel) ? raw : render(raw, ctx, `${layer}/${rel}`)
+      out.push({ path: targetPath(rel), content })
+    }
+  }
+  if (ctx.graphify) {
+    const dir = join(HERE, 'engines/graphify', ctx.graphify_engine)
+    for (const file of walk(dir)) {
+      out.push({ path: `scripts/graphify/${relative(dir, file).split(sep).join('/')}`, content: readFileSync(file, 'utf-8') })
+    }
+  }
+  const config = { generated_from: 'harness-loop-control', generated_at: ctx.now, ...spec }
+  out.push({ path: '_AI_LOOP_CONTROL/harness.json', content: `${JSON.stringify(config, null, 2)}\n` })
+  return { ctx, files: out }
+}
+
+function mergePackageJson(target, ctx, dryRun, log) {
+  const path = join(target, 'package.json')
+  const pkg = existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : { name: ctx.project_name, private: true }
+  const scripts = { 'harness:check': 'node scripts/harness.mjs check' }
+  if (ctx.graphify) {
+    Object.assign(scripts, {
+      graph: 'node scripts/graphify/graphify.mjs',
+      'graph:build': 'node scripts/graphify/graphify.mjs build',
+      'graph:check': 'node scripts/graphify/graphify.mjs stale',
+      'graph:test': 'node --test scripts/graphify/graphify.test.mjs',
+      prepare:
+        "node -e \"try{const g=(a)=>require('node:child_process').execFileSync('git',a,{stdio:'ignore'});g(['config','core.hooksPath','.githooks']);g(['config','merge.ours.driver','true'])}catch{}\"",
+    })
+  }
+  pkg.scripts ??= {}
+  const added = []
+  for (const [name, command] of Object.entries(scripts)) {
+    if (pkg.scripts[name] === undefined) {
+      pkg.scripts[name] = command
+      added.push(name)
+    } else if (pkg.scripts[name] !== command) {
+      log.warn.push(`package.json: el script «${name}» ya existe y no se tocó; revisar que haga lo del harness`)
+    }
+  }
+  if (ctx.graphify_code && !pkg.devDependencies?.typescript && !pkg.dependencies?.typescript) {
+    pkg.devDependencies = { ...pkg.devDependencies, typescript: '^6.0.3' }
+    added.push('devDependencies.typescript')
+  }
+  if (!added.length) return
+  ;(existsSync(path) ? log.merged : log.created).push(`package.json (${added.join(', ')})`)
+  if (!dryRun) writeFileSync(path, `${JSON.stringify(pkg, null, 2)}\n`)
+}
+
+/** `.gitattributes` existente: se le agregan las líneas que le faltan, al final. */
+function appendMissingLines(existing, content) {
+  const have = new Set(existing.split(/\r?\n/).map((l) => l.trim()))
+  const missing = content.split('\n').filter((l) => l.trim() && !l.startsWith('#') && !have.has(l.trim()))
+  return missing.length ? `${existing.replace(/\n?$/, '\n')}\n# Harness (generado por harness-loop-control)\n${missing.join('\n')}\n` : null
+}
+
+export function generate({ spec, target, dryRun = false, force = false, now = new Date() }) {
+  const { ctx, files } = plan(spec, now)
+  const log = { created: [], skipped: [], merged: [], warn: [] }
+  for (const { path, content } of files) {
+    const abs = join(target, path)
+    if (existsSync(abs) && !force) {
+      if (path === '.gitattributes') {
+        const merged = appendMissingLines(readFileSync(abs, 'utf-8'), content)
+        if (merged) {
+          log.merged.push(path)
+          if (!dryRun) writeFileSync(abs, merged)
+        }
+      } else log.skipped.push(path)
+      continue
+    }
+    log.created.push(path)
+    if (!dryRun) {
+      mkdirSync(dirname(abs), { recursive: true })
+      writeFileSync(abs, content)
+    }
+  }
+  mergePackageJson(target, ctx, dryRun, log)
+  return { ctx, log }
+}
+
+function run(cmd, args, cwd) {
+  return spawnSync(cmd, args, { cwd, encoding: 'utf-8' })
+}
+
+function main(argv) {
+  const arg = (name) => {
+    const i = argv.indexOf(name)
+    return i === -1 ? undefined : argv[i + 1]
+  }
+  const specPath = arg('--spec')
+  const targetArg = arg('--target')
+  if (argv.includes('--help') || !specPath || !targetArg) {
+    console.log('uso: node bin/harness-init.mjs --spec <harness.spec.json> --target <repo> [--dry-run] [--force]')
+    process.exit(specPath && targetArg ? 0 : 1)
+  }
+  const dryRun = argv.includes('--dry-run')
+  const spec = JSON.parse(readFileSync(resolve(specPath), 'utf-8'))
+  const errors = validateSpec(spec)
+  if (errors.length) {
+    console.error(`spec inválida (${specPath}):`)
+    for (const e of errors) console.error(`  - ${e}`)
+    process.exit(1)
+  }
+  const target = resolve(targetArg)
+  if (existsSync(target) && !statSync(target).isDirectory()) {
+    console.error(`${target} no es un directorio`)
+    process.exit(1)
+  }
+  if (!dryRun) mkdirSync(target, { recursive: true })
+
+  const { ctx, log } = generate({ spec, target, dryRun, force: argv.includes('--force') })
+  const show = (title, items) => items.length && console.log(`\n${title} (${items.length}):\n${items.map((i) => `  ${i}`).join('\n')}`)
+  console.log(`${dryRun ? '[dry-run] ' : ''}harness para ${ctx.project_title} → ${target}`)
+  show('Crea', log.created)
+  show('Completa', log.merged)
+  show('Ya existían, no se tocaron (--force para pisarlos)', log.skipped)
+  show('Avisos', log.warn)
+  if (dryRun) return
+
+  const notes = []
+  if (ctx.graphify && existsSync(join(target, '.git'))) {
+    run('git', ['config', 'core.hooksPath', '.githooks'], target)
+    run('git', ['config', 'merge.ours.driver', 'true'], target)
+    notes.push('hooks de git activos (core.hooksPath = .githooks)')
+  } else if (ctx.graphify) {
+    notes.push('el destino no es un repo git: al hacer `git init`, correr `npm install` (script prepare) para activar los hooks')
+  }
+  if (ctx.graphify) {
+    const graph = run('node', ['scripts/graphify/graphify.mjs', 'build'], target)
+    notes.push(
+      graph.status === 0
+        ? 'mapa inicial generado (.graphify/graph.json)'
+        : `el mapa no se pudo generar todavía${ctx.graphify_code ? ' (¿falta `npm install` para typescript?)' : ''}: correr \`npm run graph:build\``
+    )
+  }
+  const check = run('node', ['scripts/harness.mjs', 'check'], target)
+  notes.push(check.status === 0 ? check.stdout.trim() : `harness check FALLÓ:\n${check.stderr}`)
+
+  const todos = log.created.filter((p) => !VERBATIM.test(p) && readFileSync(join(target, p), 'utf-8').includes('TODO(owner)'))
+  if (todos.length) notes.push(`quedan TODO(owner) para completar en: ${todos.join(', ')}`)
+  show('Después de generar', notes)
+  if (check.status !== 0) process.exit(1)
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main(process.argv.slice(2))

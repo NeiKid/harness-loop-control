@@ -1,0 +1,31 @@
+name: harness
+
+on:
+  push:
+    branches: [{{trunk}}, {{stable}}]
+  pull_request:
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Harness (ledger, heartbeat, índice de specs)
+        run: node scripts/harness.mjs check
+{{#graphify}}
+{{#graphify_code}}
+      # El parser del mapa es el de TypeScript. Si el repo ya instala sus dependencias en este job,
+      # reemplazar este paso por ese install.
+      - name: TypeScript para el mapa
+        run: npm install --no-save --no-package-lock --ignore-scripts typescript
+{{/graphify_code}}
+      - name: Mapa (tests)
+        run: node --test scripts/graphify/graphify.test.mjs
+      # En una rama de trabajo el mapa está atrasado a propósito: sólo se exige en el tronco y en lo estable.
+      - name: Mapa al día
+        if: github.ref == 'refs/heads/{{trunk}}' || github.ref == 'refs/heads/{{stable}}'
+        run: node scripts/graphify/graphify.mjs stale
+{{/graphify}}
