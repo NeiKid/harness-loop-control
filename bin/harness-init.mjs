@@ -7,7 +7,7 @@
  * Nunca pisa un archivo existente salvo con --force; `.gitattributes` y `package.json` se completan
  * con lo que les falta. Sin dependencias.
  */
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, statSync, chmodSync } from 'node:fs'
 import { resolve, dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -192,7 +192,8 @@ function mergePackageJson(target, ctx, dryRun, log) {
   // Al instalar: hooks de git activos y MCPs registrados en esta máquina.
   const prepare = [
     ctx.hooks &&
-      "node -e \"try{const g=(a)=>require('node:child_process').execFileSync('git',a,{stdio:'ignore'});g(['config','core.hooksPath','.githooks']);g(['config','merge.ours.driver','true'])}catch{}\"",
+      // También repone el permiso de ejecución: un clon de un repo commiteado desde Windows lo pierde.
+      "node -e \"try{const fs=require('node:fs');for(const f of fs.readdirSync('.githooks'))fs.chmodSync('.githooks/'+f,0o755);const g=(a)=>require('node:child_process').execFileSync('git',a,{stdio:'ignore'});g(['config','core.hooksPath','.githooks']);g(['config','merge.ours.driver','true'])}catch{}\"",
     ctx.mcp_any && 'node scripts/agent-session.mjs sync --quiet',
   ].filter(Boolean)
   if (prepare.length) scripts.prepare = prepare.join(' && ')
@@ -267,6 +268,8 @@ export function generate({ spec, target, dryRun = false, force = false, now = ne
     if (!dryRun) {
       mkdirSync(dirname(abs), { recursive: true })
       writeFileSync(abs, content)
+      // git ignora en silencio un hook que no es ejecutable (Linux y macOS).
+      if (path.startsWith('.githooks/')) chmodSync(abs, 0o755)
     }
   }
   mergePackageJson(target, ctx, dryRun, log)
